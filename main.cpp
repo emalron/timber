@@ -1,4 +1,5 @@
 #include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
 #include <iostream>
 #include <sstream>
 
@@ -108,7 +109,7 @@ int main() {
     
     // make a time bar
     RectangleShape timeBar;
-    float timeBarStartWidth = 400, timeBarHeight = 80, timeRemaining = 400;
+    float timeBarStartWidth = 400, timeBarHeight = 80, timeRemaining = 6, timeBarWidthPerSecond = timeBarStartWidth / timeRemaining;
     Vector2f timebarSize = Vector2f(timeBarStartWidth, timeBarHeight);
     timeBar.setSize(timebarSize);
     timeBar.setFillColor(Color::Red);
@@ -121,11 +122,23 @@ int main() {
     // Timer
     Clock clock;
 
+    // prepare sound buffer
+    SoundBuffer chopBuffer, deathBuffer, ooTimeBuffer;
+    chopBuffer.loadFromFile("assets/sound/chop.wav");
+    deathBuffer.loadFromFile("assets/sound/death.wav");
+    ooTimeBuffer.loadFromFile("assets/sound/out_of_time.wav");
+
+    Sound chop, death, ooTime;
+    chop.setBuffer(chopBuffer);
+    death.setBuffer(deathBuffer);
+    ooTime.setBuffer(ooTimeBuffer);
+
     // Variables for representing states
     bool activeBee, activeClouds[MAX_NUMBER_CLOUDS], acceptInput, hit, axeDisplay=false;
     float beeHeight, beeSpeed, cloudsHeight[MAX_NUMBER_CLOUDS], cloudsSpeed[MAX_NUMBER_CLOUDS];
-    int scores;
+    int scores, scrNum = 0;
     Event event;
+    Vector2f logSpeed;
 
     initializeGame(gameState, playerPosition, branchesPosition, timeBar, timebarSize, timeRemaining, scores, acceptInput, hit, activeBee, activeClouds);
 
@@ -147,6 +160,23 @@ int main() {
         if(Keyboard::isKeyPressed(Keyboard::Return)) {
             initializeGame(gameState, playerPosition, branchesPosition, timeBar, timebarSize, timeRemaining, scores, acceptInput, hit, activeBee, activeClouds);
             gameState = state::PLAYING;
+            spPlayer.setTexture(txtrPlayer);
+        }
+
+        if(Keyboard::isKeyPressed(Keyboard::F12)) {
+            Image screenshot;
+            Vector2u windowSize = window.getSize();
+            Texture txtrCapture;
+            txtrCapture.create(windowSize.x, windowSize.y);
+            txtrCapture.update(window);
+            screenshot = txtrCapture.copyToImage();
+
+            std::stringstream filename;
+
+            filename << "screenshot" << scrNum << ".png";
+            scrNum ++;
+
+            screenshot.saveToFile(filename.str());
         }
 
         if(acceptInput) {
@@ -179,7 +209,6 @@ int main() {
             if(hit) {
                 // let positions of branches down
                 for(int i = MAX_NUMBER_BRANCHES-1; i > 0; i--) {
-                    std::cout << "branch #" << i << " update... " << std::endl;
                     branchesPosition[i] = branchesPosition[i-1];
                 }
 
@@ -187,14 +216,35 @@ int main() {
                 updateBranches(scores);
 
                 bool isSquished = playerPosition == branchesPosition[5];
-                if(!isSquished && hit) {
+                if(!isSquished) {
                     // add +1 score
                     scores++;
 
-                    timeRemaining += 2.0f/(float)scores + 15.0f;
+                    timeRemaining += 0.15f/(float)scores + 0.15;
+
+                    std::cout << "Bonus factor is " << 2/scores + 0.15 << std::endl;
+                    std::cout << "Bonus Time is .. " << timeRemaining << std::endl;
 
                     // set log sprite, its speed and its direction
+                    FloatRect pRect_ = spPlayer.getGlobalBounds();
+                    float logX_ = spTree.getGlobalBounds().left;
+                    float logY_ = pRect_.top + pRect_.height / 2;
+                    spLog.setPosition(logX_, logY_);
+                    
+                    switch(playerPosition) {
+                        case side::LEFT:
+                            logSpeed.x = 5000;
+                            logSpeed.y = -1000;
+                            break;
+                        case side::RIGHT:
+                            logSpeed.x = -5000;
+                            logSpeed.y = -1000;
+                            break;
+                        default:
+                            logSpeed = Vector2f(0, 0);
+                    }
 
+                    chop.play();
                 }
                 else {
                     gameState = state::DEAD;
@@ -226,7 +276,7 @@ int main() {
                 setBranches(branchesPosition[i], spTree, i, spBranches[i]);
             }
 
-            // update log animation 2 cases
+            // update axe animations: 2 cases
             if(axeDisplay) {
                 FloatRect pRect = spPlayer.getGlobalBounds();
                 FloatRect aRect = spAxe.getGlobalBounds();
@@ -255,9 +305,23 @@ int main() {
                 spAxe.setPosition(2000,0);
             }
 
+            // update flying log
+            Vector2f curLocationLog = spLog.getPosition();
+            bool isLogOutofBoundary = (curLocationLog.x < 0 || curLocationLog.x > window.getSize().x);
+            if(isLogOutofBoundary) {
+                spLog.setPosition(-500, -500);
+            }
+            else {
+                curLocationLog.x += logSpeed.x * dt;
+                curLocationLog.y += logSpeed.y * dt;
+                spLog.setPosition(curLocationLog);
+            }
+            
+
             // update timeBar
-            timeRemaining -= timeBarStartWidth / timebarReminder * dt;
-            timeBar.setSize(Vector2f(timeRemaining, timeBarHeight));
+            timeRemaining -=  dt;
+            
+            timeBar.setSize(Vector2f(timeBarWidthPerSecond * timeRemaining, timeBarHeight));
             if(timeRemaining <= 0) {
                 gameState = state::TIMEOVER;
             }
@@ -274,9 +338,12 @@ int main() {
                     break;
                 case state::DEAD:
                     setStateMessage(window, "You are dead...", txtStates);
+                    spPlayer.setTexture(txtrGravestone);
+                    death.play();
                     break;
                 case state::TIMEOVER:
                     setStateMessage(window, "Out of time!", txtStates);
+                    ooTime.play();
                     break;
                 default:
                     setStateMessage(window, "Press Enter to start!", txtStates);
@@ -314,7 +381,7 @@ int main() {
 }
 
 void updateBranches(int seed) {
-    srand(seed);
+    srand((int)time(0) + seed);
     int temp_ = rand() % 5;
 
     switch(temp_) {
@@ -412,7 +479,7 @@ void initializeGame(state &gameState, side &playerPosition, side branchesPositio
     }
 
     timebar.setSize(timebarSize);
-    timeRemaining = timebarSize.x;
+    timeRemaining = 6;
 
     scores = 0;
 
